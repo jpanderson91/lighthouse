@@ -12,7 +12,7 @@
     "workspaceName": {
       "type": "string",
       "metadata": {
-        "description": "Specify the name for Log Analytcis workspace"
+        "description": "Specify the name for Log Analytics workspace"
       }
     },
     "retentionInDays": {
@@ -25,7 +25,7 @@
   "variables": {
     "workspaceName": "[format('{0}-{1}', parameters('workspaceName'), parameters('location'))]",
     "solutionName": "[format('SecurityInsights({0})', variables('workspaceName'))]"
-},
+  },
   "resources": [
     {
       "type": "Microsoft.OperationalInsights/workspaces",
@@ -55,6 +55,19 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.SecurityInsights/onboardingStates",
+      "apiVersion": "2024-03-01",
+      "name": "default",
+      "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]",
+      "properties": {
+        "customerManagedKey": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]",
+        "[resourceId('Microsoft.OperationsManagement/solutions', variables('solutionName'))]"
       ]
     }
   ]
