@@ -352,7 +352,7 @@
             "properties": {
                 "registrationDefinitionName": "[variables('mspOfferName')]",
                 "description": "[variables('mspOfferDescription')]",
-                "managedByTenantId": "[variables('managedByTenantId')]",
+                "managedByTenantId": "[parameters('managedByTenantId')]",
                 "authorizations": "[variables('authorizations')]"
             }
         },
