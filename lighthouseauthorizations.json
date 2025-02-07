@@ -2,13 +2,15 @@
     "$schema": "https://schema.management.azure.com/schemas/2019-08-01/subscriptionDeploymentTemplate.json#",
     "contentVersion": "1.0.0.0",
     "parameters": {
+            "managedByTenantId": {
+                "type": "string"
+            }
     },
     "variables": {
         "mspOfferName": "TMNA MSSP SOC Services",
         "mspOfferDescription": "MSSP SOC Management Services",
         "mspRegistrationName": "[guid(variables('mspOfferName'))]",
         "mspAssignmentName": "[guid(variables('mspOfferName'))]",
-        "managedByTenantId": "8c642d1d-d709-47b0-ab10-080af10798fb",
         "authorizations": [
 
             // RSOC_Sentinel_Admin - Breakglass group / PIM access
