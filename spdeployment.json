@@ -8,7 +8,7 @@
         },
         "userAssignedIdentityName": {
             "type": "String",
-            "defaultValue": "MsspName-SOC-UMI"
+            "defaultValue": "MSSP-RSOC-Sentinel-Ingestion-UMI"
         }
     },
     "variables": {
