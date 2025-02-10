@@ -1,4 +1,4 @@
-Links to deploy custom template for lighthouse authorizations:\
+Links to deploy custom template for lighthouse authorizations:
 
 1. Lighthouse Authorizations
 
