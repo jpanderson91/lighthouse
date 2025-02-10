@@ -1,16 +1,19 @@
 #Ensure the right subscription context is created
-Set-AzContext -Subscription '<Customer New Subscription>'
+$subscription = '<Customer New Subscription>'
+$affiliatePrefix = "<Txxxx>"
+$context = Set-AzContext -Subscription $subscription
 
 # Change CustomerName to the name of the SOC customer
-$umiName = "CustomerName-Sentinel-Ingestion-UMI"
+$umiName = "MSSP-RSOC-Sentinel-Ingestion-UMI"
 # Add required Azure Resource Providers
 Register-AzResourceProvider -ProviderNamespace Microsoft.Insights
 Register-AzResourceProvider -ProviderNamespace Microsoft.ManagedServices
 Register-AzResourceProvider -ProviderNamespace Microsoft.ManagedIdentity
 # Default resource group for managed identities
-$rg = "CustomerName-Sentinel-Prod-rg"
-$azRegion = "<REGION>" # this should match your deployment region and should only be: eastus, eastus2, westus2, australiacentral, brazilsouth, southeastasia
+$rg = "$($affiliatePrefix)-Sentinel-Prod-rg"
+$azRegion = "eastus" # this should match your deployment region and should only be: eastus, eastus2, westus2, australiacentral, brazilsouth, southeastasia
 $graphAppId = "00000003-0000-0000-c000-000000000000" # Don't change this.
+
 # Graph API permissions to set
 $addPermissions = @(
   "Application.ReadWrite.OwnedBy"
@@ -33,11 +36,9 @@ $umi = Get-AzAdServicePrincipal -DisplayName $umiName
 $graphSP = Get-AzADServicePrincipal -appId $graphAppId
 $appRoles = $graphSP.AppRole | Where-Object {($_.Value -in $addPermissions) -and ($_.AllowedMemberType -contains "Application")}
 
-Connect-AzureAD -TenantId '<CustomerTenantId>'
+Connect-AzureAD -TenantId $context.Tenant.Id
 # If Connect-AzureAd does not work, run 'Connect-AzureAD -TenantId <CustomerTenantId>'
 Start-Sleep 10
-
-$appRoles | ForEach-Object { New-AzureAdServiceAppRoleAssignment -ObjectId $umi.Id -PrincipalId $umi.Id -ResourceId $graphSp.Id -Id $_.Id }
 
 # Assign User Assigned Identity Owner permissions to the subscription 
 New-AzRoleAssignment -RoleDefinitionId $azureOwnerRoleId -ObjectId $umi.Id -Scope $scope
@@ -45,3 +46,14 @@ Start-Sleep 5
 New-AzRoleAssignment -RoleDefinitionId $azureKVAdminRoleId -ObjectId $umi.Id -Scope $scope
 Start-Sleep 5
 New-AzRoleAssignment -RoleDefinitionId $azureKVUserRoleId -ObjectId $umi.Id -Scope $scope
+Start-Sleep 5
+
+# This requires permissions to assign app roles so may need to be rerun by an administrator. Have them run the following
+#Connect-AzureAD -TenantId $context.Tenant.Id
+
+# Graph API permissions to set
+$addPermissions = @(
+  "Application.ReadWrite.OwnedBy"
+)
+
+$appRoles | ForEach-Object { New-AzureAdServiceAppRoleAssignment -ObjectId $umi.Id -PrincipalId $umi.Id -ResourceId $graphSp.Id -Id $_.Id }
