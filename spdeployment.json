@@ -12,7 +12,6 @@
         }
     },
     "variables": {
-        // This should be customized in the template to reflect the naming standard.
         "appRegistrationDisplayName": "MSSP-Sentinel-Ingestion"
     },
     "resources": [
