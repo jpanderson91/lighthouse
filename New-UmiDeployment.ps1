@@ -128,5 +128,3 @@ $newOwner = @{
 # This adds the UMI as an owner to application
 New-MgApplicationOwnerByRef -ApplicationId $adsp.Id -BodyParameter $newOwner
 
-# This will update the name to be in line with our new standard name
-Update-MgApplication -ApplicationId $Id -DisplayName 'MSSP-Sentinel-Ingestion'
