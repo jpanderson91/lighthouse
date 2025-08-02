@@ -342,6 +342,3 @@ Write-Information "Application Registration: $appName" -InformationAction Contin
 Write-Information "Application ID: $($application.AppId)" -InformationAction Continue
 Write-Information "Service Principal Object ID: $($adsp.Id)" -InformationAction Continue
 Write-Information "UMI Object ID: $($umi.Id)" -InformationAction Continue
-Write-Information '' -InformationAction Continue
-Write-Information 'IMPORTANT: Application secret expires in 24 hours!' -InformationAction Continue
-Write-Information "Secret Value: $($appSecret.SecretText)" -InformationAction Continue
