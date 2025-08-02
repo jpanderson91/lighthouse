@@ -13,7 +13,7 @@ Links to deploy custom template for lighthouse authorizations:
 
   ![Cloud Shell](./images/cloudshell.png)
 
-  - Upload the file to the Cloud Shell using the upload button in the Cloud Shell toolbar.
+  - Upload the file to the Cloud Shell using the **Manage Files > Upload** button in the Cloud Shell toolbar.
 
   ![Upload PowerShell Script to Azure Cloud Shell](./images/upload-script-cloudshell.png)
 
