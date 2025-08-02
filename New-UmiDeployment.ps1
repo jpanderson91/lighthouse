@@ -34,6 +34,23 @@ param (
 # Set maximum retry attempts for Azure operations
 $maxRetries = 10
 
+# Initialize change tracking variables to summarize actions taken
+$changesSummary = @{
+  ResourceGroupCreated    = $false
+  UmiCreated              = $false
+  UmiFound                = $false
+  ApplicationCreated      = $false
+  ApplicationFound        = $false
+  ServicePrincipalCreated = $false
+  ServicePrincipalFound   = $false
+  SecretCreated           = $false
+  RoleAssignments         = @()
+  GraphPermissions        = @()
+  OwnershipAdded          = $false
+  GraphConnectionMade     = $false
+  ModulesInstalled        = @()
+}
+
 # Check if running in Azure Cloud Shell by examining environment variables
 # ACC_CLOUD=PROD indicates Azure Cloud Shell environment
 # AZUREPS_HOST_ENVIRONMENT=cloud-shell indicates PowerShell in Cloud Shell
@@ -139,6 +156,7 @@ $metricsPubRoleId = '3913510d-42f4-4e42-8a64-420c390055eb'   # Monitoring Metric
 if ([string]::IsNullOrEmpty((Get-AzResourceGroup -Name $rg -ErrorAction SilentlyContinue))) {
   Write-Information "Creating resource group: $rg" -InformationAction Continue
   New-AzResourceGroup -Name $rg -Location $AzRegion
+  $changesSummary.ResourceGroupCreated = $true
 }
 else {
   Write-Information "Resource group $rg already exists" -InformationAction Continue
@@ -180,15 +198,15 @@ if ($needsConnection) {
   # Use Microsoft Graph PowerShell to connect with required scopes
   # Scopes are permissions required for the operations we will perform
   Connect-MgGraph -Scopes $requiredScopes -NoWelcome
-}
-
-# Check if User Managed Identity already exists to avoid duplication
+  $changesSummary.GraphConnectionMade = $true
+}# Check if User Managed Identity already exists to avoid duplication
 # UMI provides a managed identity that can be assigned to Azure resources
 Write-Information 'Checking if User Managed Identity already exists' -InformationAction Continue
 $existingUmi = Get-AzUserAssignedIdentity -Name $umiName -ResourceGroupName $rg -ErrorAction SilentlyContinue
 
 if ($existingUmi) {
   Write-Information "User Managed Identity '$umiName' exists - skipping creation" -InformationAction Continue
+  $changesSummary.UmiFound = $true
 
   # Get the associated service principal for the existing UMI
   # UMI creates a service principal in Azure AD with the same name
@@ -202,6 +220,7 @@ if ($existingUmi) {
 else {
   Write-Information "Creating User Managed Identity '$umiName'" -InformationAction Continue
   $null = New-AzUserAssignedIdentity -Name $umiName -ResourceGroupName $rg -Location $AzRegion
+  $changesSummary.UmiCreated = $true
 
   # Wait for the UMI to be created and available in Azure AD
   $retryCount = 0
@@ -230,8 +249,6 @@ else {
     }
   } while (-not $umi)
 }
-
-
 # RBAC ROLE ASSIGNMENTS FOR USER MANAGED IDENTITY
 
 
@@ -281,6 +298,7 @@ foreach ($role in $roleAssignments) {
     try {
       $null = New-AzRoleAssignment -RoleDefinitionId $role.RoleId -ObjectId $umi.Id -Scope $scope -ErrorAction Stop
       Write-Information "Successfully assigned '$($role.Name)' role" -InformationAction Continue
+      $changesSummary.RoleAssignments += $role.Name
     }
     catch {
       # Handle common errors gracefully
@@ -308,6 +326,7 @@ $existingApplication = Get-MgApplication -Filter "DisplayName eq '$appName'" -Er
 if ($existingApplication) {
   Write-Information "Application registration '$appName' exists - using existing" -InformationAction Continue
   $application = $existingApplication
+  $changesSummary.ApplicationFound = $true
 
   # Check if service principal exists for this application
   $existingServicePrincipal = Get-MgServicePrincipal -Filter "AppId eq '$($application.AppId)'" -ErrorAction SilentlyContinue
@@ -315,6 +334,7 @@ if ($existingApplication) {
   if ($existingServicePrincipal) {
     Write-Information "Service Principal for '$appName' exists - using existing" -InformationAction Continue
     $adsp = $existingServicePrincipal
+    $changesSummary.ServicePrincipalFound = $true
   }
   else {
     Write-Information "Creating Service Principal for existing application '$appName'" -InformationAction Continue
@@ -323,6 +343,7 @@ if ($existingApplication) {
       DisplayName = $appName
     }
     $null = New-MgServicePrincipal @spParams
+    $changesSummary.ServicePrincipalCreated = $true
 
     # Wait for service principal to be available
     $retryCount = 0
@@ -440,6 +461,7 @@ $secretParams = @{
 
 $appSecret = Add-MgApplicationPassword -ApplicationId $application.Id -BodyParameter $secretParams
 Write-Information "Application secret created with 1-day expiration: $($appSecret.SecretText)" -InformationAction Continue
+$changesSummary.SecretCreated = $true
 
 # MICROSOFT GRAPH API PERMISSIONS FOR UMI
 
@@ -480,6 +502,7 @@ $appRoles | ForEach-Object {
     try {
       New-MgServicePrincipalAppRoleAssignment -ResourceId $graphSP.Id -PrincipalId $umi.Id -AppRoleId $_.Id -ServicePrincipalId $umi.Id
       Write-Information "Successfully assigned '$roleName' permission" -InformationAction Continue
+      $changesSummary.GraphPermissions += $roleName
     }
     catch {
       Write-Warning "Failed to assign '$roleName' permission: $($_.Exception.Message)"
@@ -514,25 +537,111 @@ else {
     # This enables the UMI to manage the application registration autonomously
     New-MgApplicationOwnerByRef -ApplicationId $application.Id -BodyParameter $newOwner
     Write-Information 'Successfully added UMI as application owner' -InformationAction Continue
+    $changesSummary.OwnershipAdded = $true
   }
   catch {
     if ($_.Exception.Message -like '*already exists*' -or $_.Exception.Message -like '*conflict*') {
-      Write-Information 'UMI ownership already exists (detected during assignment attempt)' -InformationAction Continue
+      Write-Information ' UMI ownership already exists (detected during assignment attempt)' -InformationAction Continue
     }
     else {
-      Write-Warning "Failed to add UMI as application owner: $($_.Exception.Message)"
+      Write-Warning " Failed to add UMI as application owner: $($_.Exception.Message)"
     }
   }
 }
+
+
+# COMPREHENSIVE CHANGES SUMMARY
+
+Write-Information ' ' -InformationAction Continue
+Write-Information ' === CHANGES MADE DURING THIS EXECUTION ===' -InformationAction Continue
+
+# Azure Authentication and Setup
+if ($changesSummary.GraphConnectionMade) {
+  Write-Information '  Connected to Microsoft Graph with required permissions' -InformationAction Continue
+}
+else {
+  Write-Information '  Used existing Microsoft Graph connection' -InformationAction Continue
+}
+
+# Resource Group
+if ($changesSummary.ResourceGroupCreated) {
+  Write-Information "  Created new resource group: $rg" -InformationAction Continue
+}
+else {
+  Write-Information "  Used existing resource group: $rg" -InformationAction Continue
+}
+
+# User Managed Identity
+if ($changesSummary.UmiCreated) {
+  Write-Information "  Created new User Managed Identity: $umiName" -InformationAction Continue
+}
+elseif ($changesSummary.UmiFound) {
+  Write-Information "  Found and used existing User Managed Identity: $umiName" -InformationAction Continue
+}
+
+# RBAC Role Assignments
+if ($changesSummary.RoleAssignments.Count -gt 0) {
+  Write-Information "  Assigned $($changesSummary.RoleAssignments.Count) RBAC role(s):" -InformationAction Continue
+  foreach ($role in $changesSummary.RoleAssignments) {
+    Write-Information "  - $role" -InformationAction Continue
+  }
+}
+else {
+  Write-Information '  All required RBAC roles were already assigned' -InformationAction Continue
+}
+
+# Application Registration
+if ($changesSummary.ApplicationCreated) {
+  Write-Information "  Created new application registration: $appName" -InformationAction Continue
+}
+elseif ($changesSummary.ApplicationFound) {
+  Write-Information "  Found and used existing application registration: $appName" -InformationAction Continue
+}
+
+# Service Principal
+if ($changesSummary.ServicePrincipalCreated) {
+  Write-Information "  Created new service principal for application: $appName" -InformationAction Continue
+}
+elseif ($changesSummary.ServicePrincipalFound) {
+  Write-Information "  Found and used existing service principal for: $appName" -InformationAction Continue
+}
+
+# Client Secret
+if ($changesSummary.SecretCreated) {
+  Write-Information '  Created new application secret (1-day expiration)' -InformationAction Continue
+}
+
+# Microsoft Graph Permissions
+if ($changesSummary.GraphPermissions.Count -gt 0) {
+  Write-Information "  Assigned $($changesSummary.GraphPermissions.Count) Microsoft Graph permission(s):" -InformationAction Continue
+  foreach ($permission in $changesSummary.GraphPermissions) {
+    Write-Information "  - $permission" -InformationAction Continue
+  }
+}
+else {
+  Write-Information '  All required Microsoft Graph permissions were already assigned' -InformationAction Continue
+}
+
+# Application Ownership
+if ($changesSummary.OwnershipAdded) {
+  Write-Information '  Added UMI as owner of the application registration' -InformationAction Continue
+}
+else {
+  Write-Information '  UMI was already an owner of the application registration' -InformationAction Continue
+}
+
+Write-Information ' ' -InformationAction Continue
+
 
 # DEPLOYMENT COMPLETION SUMMARY
 
 # Display comprehensive deployment summary with all important identifiers
 # These values are essential for configuring Sentinel and other dependent services
 Write-Information '=== DEPLOYMENT COMPLETED SUCCESSFULLY ===' -InformationAction Continue
-Write-Information "Resource Group: $rg" -InformationAction Continue
-Write-Information "User Managed Identity: $umiName" -InformationAction Continue
-Write-Information "  UMI Object ID: $($umi.Id)" -InformationAction Continue
-Write-Information "Application Registration: $appName" -InformationAction Continue
-Write-Information "  Application ID: $($application.AppId)" -InformationAction Continue
-Write-Information "  Service Principal Object ID: $($adsp.Id)" -InformationAction Continue
+Write-Information ' ' -InformationAction Continue
+Write-Information "  Resource Group: $rg" -InformationAction Continue
+Write-Information "  User Managed Identity: $umiName" -InformationAction Continue
+Write-Information "    UMI Object ID: $($umi.Id)" -InformationAction Continue
+Write-Information "  Application Registration: $appName" -InformationAction Continue
+Write-Information "    Application ID: $($application.AppId)" -InformationAction Continue
+Write-Information "    Service Principal Object ID: $($adsp.Id)" -InformationAction Continue
