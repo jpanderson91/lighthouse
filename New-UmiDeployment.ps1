@@ -83,8 +83,11 @@ if (-not $Subscription) {
   }
   elseif ($subscriptions.Count -eq 0) {
     # No sentinel subscriptions found - show all and prompt
-    Write-Information 'No sentinel subscriptions found - please enter one.' -InformationAction Continue
+    Write-Information ' ' -InformationAction Continue
+    Write-Information 'No Sentinel subscriptions found - please enter one.' -InformationAction Continue
+    Write-Information ' ' -InformationAction Continue
     Get-AzSubscription | Format-Table -Property Name, Id
+    Write-Information ' ' -InformationAction Continue
     do {
       $Subscription = Read-Host 'Enter the subscription id'
     } while ($Subscription.Length -lt 36)
@@ -110,7 +113,7 @@ if ($isCloudShell) {
 }
 else {
   Write-Information 'If running locally, ensure you are authenticated with Connect-AzAccount' -InformationAction Continue
-  Connect-AzAccount  # Uncomment if needed for local execution
+  Connect-AzAccount
 }
 
 # Set the subscription context for all subsequent operations
@@ -143,13 +146,41 @@ else {
 
 # Connect to Microsoft Graph early for all directory operations
 # This connection is required for application registration and service principal management
-Write-Information 'Connecting to Microsoft Graph' -InformationAction Continue
-Write-Information 'You will need to open a new tab and authenticate' -InformationAction Continue
-Write-Information ' ' -InformationAction Continue
 
-# Use Microsoft Graph PowerShell to connect with required scopes
-# Scopes are permissions required for the operations we will perform
-Connect-MgGraph -Scopes 'Application.ReadWrite.All', 'Directory.Read.All', 'AppRoleAssignment.ReadWrite.All' -NoWelcome
+# Check if already connected to Microsoft Graph with the required scopes
+$requiredScopes = @('Application.ReadWrite.All', 'Directory.Read.All', 'AppRoleAssignment.ReadWrite.All')
+$currentContext = Get-MgContext -ErrorAction SilentlyContinue
+
+# Determine if we need to connect or reconnect
+$needsConnection = $false
+if (-not $currentContext) {
+  Write-Information 'Not connected to Microsoft Graph - connecting now' -InformationAction Continue
+  $needsConnection = $true
+}
+else {
+  # Check if we have all required scopes
+  $missingScopes = $requiredScopes | Where-Object { $_ -notin $currentContext.Scopes }
+  if ($missingScopes) {
+    Write-Information "Connected to Microsoft Graph but missing required scopes: $($missingScopes -join ', ')" -InformationAction Continue
+    Write-Information 'Reconnecting with all required scopes...' -InformationAction Continue
+    $needsConnection = $true
+  }
+  else {
+    Write-Information 'Already connected to Microsoft Graph with required scopes' -InformationAction Continue
+  }
+}
+
+# Connect only if needed
+if ($needsConnection) {
+  if (-not $isCloudShell) {
+    Write-Information 'You will need to open a new tab and authenticate' -InformationAction Continue
+    Write-Information ' ' -InformationAction Continue
+  }
+
+  # Use Microsoft Graph PowerShell to connect with required scopes
+  # Scopes are permissions required for the operations we will perform
+  Connect-MgGraph -Scopes $requiredScopes -NoWelcome
+}
 
 # Check if User Managed Identity already exists to avoid duplication
 # UMI provides a managed identity that can be assigned to Azure resources
@@ -158,7 +189,15 @@ $existingUmi = Get-AzUserAssignedIdentity -Name $umiName -ResourceGroupName $rg 
 
 if ($existingUmi) {
   Write-Information "User Managed Identity '$umiName' exists - skipping creation" -InformationAction Continue
-  $umi = $existingUmi
+
+  # Get the associated service principal for the existing UMI
+  # UMI creates a service principal in Azure AD with the same name
+  Write-Information 'Getting associated service principal for existing UMI' -InformationAction Continue
+  $umi = Get-MgServicePrincipal -Filter "DisplayName eq '$umiName'" -ErrorAction SilentlyContinue
+
+  if (-not $umi) {
+    throw "Could not find service principal for existing UMI '$umiName'. This may indicate a permissions issue or the UMI may not be fully provisioned."
+  }
 }
 else {
   Write-Information "Creating User Managed Identity '$umiName'" -InformationAction Continue
@@ -198,25 +237,63 @@ else {
 
 # Assign required RBAC roles to the UMI for Sentinel operations
 # These permissions allow the UMI to manage Azure resources and access Key Vaults
-Write-Information 'Assigning RBAC roles to the UMI' -InformationAction Continue
+Write-Information 'Checking and assigning RBAC roles to the UMI...' -InformationAction Continue
+Write-Information "Using UMI Service Principal ID: $($umi.Id)" -InformationAction Continue
 
-# Owner role: Provides full access to manage all resources in the subscription
-New-AzRoleAssignment -RoleDefinitionId $azureOwnerRoleId -ObjectId $umi.Id -Scope $scope -ErrorAction SilentlyContinue
+# Get existing role assignments for the UMI to avoid duplicates
+Write-Information 'Retrieving existing role assignments for UMI...' -InformationAction Continue
+$existingRoleAssignments = Get-AzRoleAssignment -ObjectId $umi.Id -Scope $scope -ErrorAction SilentlyContinue
 
-# Monitoring Metrics Publisher: Allows publishing custom metrics to Azure Monitor
-New-AzRoleAssignment -RoleDefinitionId $metricsPubRoleId -ObjectId $umi.Id -Scope $scope -ErrorAction SilentlyContinue
+if ($existingRoleAssignments) {
+  Write-Information "Found $($existingRoleAssignments.Count) existing role assignment(s) for this UMI" -InformationAction Continue
+  foreach ($existing in $existingRoleAssignments) {
+    Write-Information "  - Existing role: $($existing.RoleDefinitionName) (ID: $($existing.RoleDefinitionId))" -InformationAction Continue
+  }
+}
+else {
+  Write-Information 'No existing role assignments found for this UMI' -InformationAction Continue
+}
 
-# Key Vault Administrator: Allows full management of Key Vault resources
-New-AzRoleAssignment -RoleDefinitionId $azureKVAdminRoleId -ObjectId $umi.Id -Scope $scope -ErrorAction SilentlyContinue
+# Define role assignments to check and create
+$roleAssignments = @(
+  @{ RoleId = $azureOwnerRoleId; Name = 'Owner'; Description = 'Provides full access to manage all resources in the subscription' },
+  @{ RoleId = $metricsPubRoleId; Name = 'Monitoring Metrics Publisher'; Description = 'Allows publishing custom metrics to Azure Monitor' },
+  @{ RoleId = $azureKVAdminRoleId; Name = 'Key Vault Administrator'; Description = 'Allows full management of Key Vault resources' },
+  @{ RoleId = $azureKVUserRoleId; Name = 'Key Vault Secrets User'; Description = 'Provides read access to Key Vault secrets' }
+)
 
-# Key Vault Secrets User: Provides read access to Key Vault secrets
-# This role allows the UMI to read secrets from Key Vaults, necessary for accessing credentials
-New-AzRoleAssignment -RoleDefinitionId $azureKVUserRoleId -ObjectId $umi.Id -Scope $scope -ErrorAction SilentlyContinue
+# Check and assign each role
+foreach ($role in $roleAssignments) {
+  # Check if this role is already assigned (match by RoleDefinitionId)
+  $existingAssignment = $existingRoleAssignments | Where-Object {
+    $_.RoleDefinitionId -eq $role.RoleId -and $_.ObjectId -eq $umi.Id -and $_.Scope -eq $scope
+  }
 
-# Wait for the role assignments to propagate across Azure AD
-# Role assignments can take time to become effective across all Azure services
-Write-Information 'Waiting for role assignments to propagate' -InformationAction Continue
-Start-Sleep 15
+  if ($existingAssignment) {
+    Write-Information "RBAC role '$($role.Name)' already assigned to UMI at scope '$scope' - skipping" -InformationAction Continue
+  }
+  else {
+    Write-Information "Assigning RBAC role '$($role.Name)' to UMI..." -InformationAction Continue
+    Write-Information "  Role ID: $($role.RoleId)" -InformationAction Continue
+    Write-Information "  Object ID: $($umi.Id)" -InformationAction Continue
+    Write-Information "  Scope: $scope" -InformationAction Continue
+
+    try {
+      $null = New-AzRoleAssignment -RoleDefinitionId $role.RoleId -ObjectId $umi.Id -Scope $scope -ErrorAction Stop
+      Write-Information "Successfully assigned '$($role.Name)' role" -InformationAction Continue
+    }
+    catch {
+      # Handle common errors gracefully
+      if ($_.Exception.Message -like '*already exists*' -or $_.Exception.Message -like '*conflict*' -or $_.Exception.Message -like '*RoleAssignmentExists*') {
+        Write-Information "RBAC role '$($role.Name)' already exists (detected during assignment attempt)" -InformationAction Continue
+      }
+      else {
+        Write-Warning "Failed to assign '$($role.Name)' role: $($_.Exception.Message)"
+        Write-Warning 'This may be due to insufficient permissions or a temporary Azure issue'
+      }
+    }
+  }
+}
 
 # APPLICATION REGISTRATION AND SERVICE PRINCIPAL CREATION
 
@@ -383,22 +460,70 @@ $addPermissions = @(
 $appRoles = $graphSP.AppRoles |
   Where-Object { ($_.Value -in $addPermissions) -and ($_.AllowedMemberTypes -contains 'Application') }
 
-# Assign each permission to the UMI service principal
+# Check existing app role assignments to avoid duplicates
+Write-Information 'Checking existing Microsoft Graph permissions for UMI...' -InformationAction Continue
+$existingAssignments = Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $umi.Id -ErrorAction SilentlyContinue
+
+# Assign each permission to the UMI service principal (only if not already assigned)
 $appRoles | ForEach-Object {
-  New-MgServicePrincipalAppRoleAssignment -ResourceId $graphSP.Id -PrincipalId $umi.Id -AppRoleId $_.Id -ServicePrincipalId $umi.Id
+  $roleId = $_.Id
+  $roleName = $_.Value
+
+  # Check if this specific app role is already assigned
+  $existingAssignment = $existingAssignments | Where-Object { $_.AppRoleId -eq $roleId -and $_.ResourceId -eq $graphSP.Id }
+
+  if ($existingAssignment) {
+    Write-Information "Microsoft Graph permission '$roleName' already assigned to UMI - skipping" -InformationAction Continue
+  }
+  else {
+    Write-Information "Assigning Microsoft Graph permission '$roleName' to UMI..." -InformationAction Continue
+    try {
+      New-MgServicePrincipalAppRoleAssignment -ResourceId $graphSP.Id -PrincipalId $umi.Id -AppRoleId $_.Id -ServicePrincipalId $umi.Id
+      Write-Information "Successfully assigned '$roleName' permission" -InformationAction Continue
+    }
+    catch {
+      Write-Warning "Failed to assign '$roleName' permission: $($_.Exception.Message)"
+    }
+  }
 }
 
 # APPLICATION OWNERSHIP AND DEPLOYMENT SUMMARY
 
 # Make sure the UMI is set as the owner of the application. This is required to allow
 # the UMI to manage the app registration and its credentials programmatically.
-$newOwner = @{
-  '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$($umi.Id)"
-}
 
-# Add the UMI as an owner to the application (using the application object, not service principal)
-# This enables the UMI to manage the application registration autonomously
-New-MgApplicationOwnerByRef -ApplicationId $application.Id -BodyParameter $newOwner
+# Check if UMI is already an owner of the application to avoid duplicate attempts
+Write-Information 'Checking application ownership...' -InformationAction Continue
+$existingOwners = Get-MgApplicationOwner -ApplicationId $application.Id -ErrorAction SilentlyContinue
+
+# Check if the UMI is already an owner
+$umiIsOwner = $existingOwners | Where-Object { $_.Id -eq $umi.Id }
+
+if ($umiIsOwner) {
+  Write-Information "UMI is already an owner of application '$appName' - skipping ownership assignment" -InformationAction Continue
+}
+else {
+  Write-Information "Adding UMI as owner of application '$appName'..." -InformationAction Continue
+
+  $newOwner = @{
+    '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$($umi.Id)"
+  }
+
+  try {
+    # Add the UMI as an owner to the application (using the application object, not service principal)
+    # This enables the UMI to manage the application registration autonomously
+    New-MgApplicationOwnerByRef -ApplicationId $application.Id -BodyParameter $newOwner
+    Write-Information 'Successfully added UMI as application owner' -InformationAction Continue
+  }
+  catch {
+    if ($_.Exception.Message -like '*already exists*' -or $_.Exception.Message -like '*conflict*') {
+      Write-Information 'UMI ownership already exists (detected during assignment attempt)' -InformationAction Continue
+    }
+    else {
+      Write-Warning "Failed to add UMI as application owner: $($_.Exception.Message)"
+    }
+  }
+}
 
 # DEPLOYMENT COMPLETION SUMMARY
 
