@@ -128,9 +128,8 @@ $azureKVAdminRoleId = '00482a5a-887f-4fb3-b363-3b7fe8e74483' # Key Vault Adminis
 $azureKVUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'  # Key Vault Secrets User for reading secrets
 $metricsPubRoleId = '3913510d-42f4-4e42-8a64-420c390055eb'   # Monitoring Metrics Publisher for telemetry
 
-# ============================================================================
-# PHASE 1: RESOURCE GROUP AND USER MANAGED IDENTITY CREATION
-# ============================================================================
+
+# RESOURCE GROUP AND USER MANAGED IDENTITY CREATION
 
 # Create resource group if it doesn't exist
 # Resource group serves as a logical container for all related Azure resources
@@ -193,9 +192,9 @@ else {
   } while (-not $umi)
 }
 
-# ============================================================================
-# PHASE 3: RBAC ROLE ASSIGNMENTS FOR USER MANAGED IDENTITY
-# ============================================================================
+
+# RBAC ROLE ASSIGNMENTS FOR USER MANAGED IDENTITY
+
 
 # Assign required RBAC roles to the UMI for Sentinel operations
 # These permissions allow the UMI to manage Azure resources and access Key Vaults
@@ -219,9 +218,7 @@ New-AzRoleAssignment -RoleDefinitionId $azureKVUserRoleId -ObjectId $umi.Id -Sco
 Write-Information 'Waiting for role assignments to propagate' -InformationAction Continue
 Start-Sleep 15
 
-# ============================================================================
-# PHASE 4: APPLICATION REGISTRATION AND SERVICE PRINCIPAL CREATION
-# ============================================================================
+# APPLICATION REGISTRATION AND SERVICE PRINCIPAL CREATION
 
 # Create the service principal/app registration using Microsoft Graph
 $appName = 'MSSP-Sentinel-Ingestion'
@@ -352,9 +349,7 @@ else {
   } while (-not $adsp)
 }
 
-# ============================================================================
-# PHASE 5: CLIENT SECRET CREATION AND MICROSOFT GRAPH PERMISSIONS
-# ============================================================================
+# CLIENT SECRET CREATION AND MICROSOFT GRAPH PERMISSIONS
 
 # Create a client secret with 1-day expiration (always create new secret for security)
 # Even for existing applications, we create a new secret to ensure fresh credentials
@@ -369,9 +364,7 @@ $secretParams = @{
 $appSecret = Add-MgApplicationPassword -ApplicationId $application.Id -BodyParameter $secretParams
 Write-Information "Application secret created with 1-day expiration: $($appSecret.SecretText)" -InformationAction Continue
 
-# ============================================================================
-# PHASE 6: MICROSOFT GRAPH API PERMISSIONS FOR UMI
-# ============================================================================
+# MICROSOFT GRAPH API PERMISSIONS FOR UMI
 
 # The UMI needs to be granted permissions to the Microsoft Graph API
 # to allow it to view and manage its owned resources in the tenant.
@@ -395,9 +388,7 @@ $appRoles | ForEach-Object {
   New-MgServicePrincipalAppRoleAssignment -ResourceId $graphSP.Id -PrincipalId $umi.Id -AppRoleId $_.Id -ServicePrincipalId $umi.Id
 }
 
-# ============================================================================
-# PHASE 7: APPLICATION OWNERSHIP AND DEPLOYMENT SUMMARY
-# ============================================================================
+# APPLICATION OWNERSHIP AND DEPLOYMENT SUMMARY
 
 # Make sure the UMI is set as the owner of the application. This is required to allow
 # the UMI to manage the app registration and its credentials programmatically.
@@ -409,9 +400,7 @@ $newOwner = @{
 # This enables the UMI to manage the application registration autonomously
 New-MgApplicationOwnerByRef -ApplicationId $application.Id -BodyParameter $newOwner
 
-# ============================================================================
 # DEPLOYMENT COMPLETION SUMMARY
-# ============================================================================
 
 # Display comprehensive deployment summary with all important identifiers
 # These values are essential for configuring Sentinel and other dependent services
