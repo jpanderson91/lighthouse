@@ -141,6 +141,12 @@ Set-AzContext -SubscriptionId $Subscription
 $subscriptionId = (Get-AzContext).Subscription.Id
 $scope = "/subscriptions/$($subscriptionId)"  # Subscription-level scope for role assignments
 
+# Register required Azure Resource Providers
+# These providers must be registered in the subscription before creating the resources
+Register-AzResourceProvider -ProviderNamespace Microsoft.Insights      # For monitoring and metrics
+Register-AzResourceProvider -ProviderNamespace Microsoft.ManagedServices # For Azure Lighthouse
+Register-AzResourceProvider -ProviderNamespace Microsoft.ManagedIdentity  # For User Managed Identities
+
 # Define Azure RBAC role IDs (these are constant GUIDs across all Azure tenants)
 # These role definitions provide the UMI with necessary permissions
 $azureOwnerRoleId = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'   # Owner role for full subscription access
@@ -645,3 +651,4 @@ Write-Information "    UMI Object ID: $($umi.Id)" -InformationAction Continue
 Write-Information "  Application Registration: $appName" -InformationAction Continue
 Write-Information "    Application ID: $($application.AppId)" -InformationAction Continue
 Write-Information "    Service Principal Object ID: $($adsp.Id)" -InformationAction Continue
+
