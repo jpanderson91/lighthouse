@@ -4,12 +4,12 @@ Links to deploy custom template for lighthouse authorizations:
 
   <a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fjpanderson91%2Flighthouse%2Frefs%2Fheads%2Fmain%2Flighthouseauthorizations.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fjpanderson91%2Flighthouse%2Frefs%2Fheads%2Fmain%2Flighthouseauthorizationsui.json" target="_blank"><img src="https://aka.ms/deploytoazurebutton"/>
 
-2. Run UMI creation PowerShell script in Azure Cloud Shell
+2. Download and run UMI creation PowerShell script in Azure Cloud Shell
 
   - Download [UMI Deployment script](New-UmiDeployment.ps1) (Right-click and click *Save link as*).
   - In the Azure Portal, open Cloud Shell.
     - Select PowerShell as the shell type.
-    - You do not need to create a resource group or storage account.
+    - Select **No storage account required.**
 
   ![Cloud Shell](./images/cloudshell.png)
 
@@ -24,3 +24,4 @@ Links to deploy custom template for lighthouse authorizations:
 3. (DEPRECATED) Deploy custom template for Service Principals deployment
 
   <a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fjpanderson91%2Flighthouse%2Frefs%2Fheads%2Fmain%2Fspdeployment.json" target="_blank"><img src="https://aka.ms/deploytoazurebutton"/>
+
